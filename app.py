@@ -17,6 +17,12 @@ logger.setLevel(logging.WARNING)
 AIPROJECT_ENDPOINT = os.getenv("AIPROJECT_ENDPOINT")
 AGENT_ID = os.getenv("AGENT_ID")
 
+# Validate required environment variables
+if not AIPROJECT_ENDPOINT:
+    raise ValueError("AIPROJECT_ENDPOINT environment variable is required")
+if not AGENT_ID:
+    raise ValueError("AGENT_ID environment variable is required")
+
 # Create an instance of the AIProjectClient using DefaultAzureCredential
 project = AIProjectClient(endpoint=AIPROJECT_ENDPOINT, credential=DefaultAzureCredential())
 
@@ -46,8 +52,8 @@ async def on_message(message: cl.Message):
             content=message.content,
         )
 
-        # Run the agent to process tne message in the thread
-        run = project.agents.runs.create_and_process_run(thread_id=thread_id, agent_id=AGENT_ID)
+        # Run the agent to process the message in the thread
+        run = project.agents.runs.create_and_process(thread_id=thread_id, agent_id=AGENT_ID)
         print(f"Run finished with status: {run.status}")
 
         # Check if you got "Rate limit is exceeded.", then you want to increase the token limit
@@ -57,12 +63,24 @@ async def on_message(message: cl.Message):
         # Get all messages from the thread
         messages = project.agents.messages.list(thread_id=thread_id, order=ListSortOrder.ASCENDING)
 
-        # Get the last message from the agent
-        last_msg = messages.get_last_text_message_by_role(MessageRole.AGENT)
+        # Find the last message from the agent by iterating through the messages
+        last_msg = None
+        for message in messages:
+            if message.role == MessageRole.AGENT:
+                last_msg = message
+        
         if not last_msg:
             raise Exception("No response from the model.")
 
-        msg.content = last_msg.text.value
+        # Extract text content from the message
+        text_contents = []
+        for content in last_msg.content:
+            if hasattr(content, 'text') and hasattr(content.text, 'value'):
+                text_contents.append(content.text.value)
+        
+        # Join all text parts into a single string
+        full_text = ' '.join(text_contents)
+        msg.content = full_text
         await msg.update()
 
     except Exception as e:
