@@ -1,12 +1,11 @@
-import os
-import chainlit as cl
 import logging
-from dotenv import load_dotenv
+import os
+
+import chainlit as cl
+from azure.ai.agents.models import ListSortOrder, MessageRole
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
-from azure.ai.projects.models import (
-    MessageRole,
-)
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
@@ -15,13 +14,11 @@ load_dotenv()
 logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
 logger.setLevel(logging.WARNING)
 
-AIPROJECT_CONNECTION_STRING = os.getenv("AIPROJECT_CONNECTION_STRING")
+AIPROJECT_ENDPOINT = os.getenv("AIPROJECT_ENDPOINT")
 AGENT_ID = os.getenv("AGENT_ID")
 
 # Create an instance of the AIProjectClient using DefaultAzureCredential
-project_client = AIProjectClient.from_connection_string(
-    conn_str=AIPROJECT_CONNECTION_STRING, credential=DefaultAzureCredential()
-)
+project = AIProjectClient(endpoint=AIPROJECT_ENDPOINT, credential=DefaultAzureCredential())
 
 
 # Chainlit setup
@@ -29,27 +26,28 @@ project_client = AIProjectClient.from_connection_string(
 async def on_chat_start():
     # Create a thread for the agent
     if not cl.user_session.get("thread_id"):
-        thread = project_client.agents.create_thread()
+        thread = project.agents.threads.create()
 
         cl.user_session.set("thread_id", thread.id)
         print(f"New Thread ID: {thread.id}")
 
+
 @cl.on_message
 async def on_message(message: cl.Message):
     thread_id = cl.user_session.get("thread_id")
-    
+
     try:
         # Show thinking message to user
         msg = await cl.Message("thinking...", author="agent").send()
 
-        project_client.agents.create_message(
+        project.agents.messages.create(
             thread_id=thread_id,
             role="user",
             content=message.content,
         )
-        
+
         # Run the agent to process tne message in the thread
-        run = project_client.agents.create_and_process_run(thread_id=thread_id, agent_id=AGENT_ID)
+        run = project.agents.runs.create_and_process_run(thread_id=thread_id, agent_id=AGENT_ID)
         print(f"Run finished with status: {run.status}")
 
         # Check if you got "Rate limit is exceeded.", then you want to increase the token limit
@@ -57,7 +55,7 @@ async def on_message(message: cl.Message):
             raise Exception(run.last_error)
 
         # Get all messages from the thread
-        messages = project_client.agents.list_messages(thread_id)
+        messages = project.agents.messages.list(thread_id=thread_id, order=ListSortOrder.ASCENDING)
 
         # Get the last message from the agent
         last_msg = messages.get_last_text_message_by_role(MessageRole.AGENT)
@@ -69,6 +67,7 @@ async def on_message(message: cl.Message):
 
     except Exception as e:
         await cl.Message(content=f"Error: {str(e)}").send()
+
 
 if __name__ == "__main__":
     # Chainlit will automatically run the application
